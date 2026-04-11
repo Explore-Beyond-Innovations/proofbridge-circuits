@@ -1,0 +1,10 @@
+[package]
+name = "auth_circuit"
+type = "bin"
+authors = [""]
+
+[dependencies]
+ecrecover = { tag = "v1.0.0", git = "https://github.com/colinnielsen/ecrecover-noir" }
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }
+# noir_bls12_381_pairing = { tag = "v0.2", git = "https://github.com/ewynx/noir_bls12_381_pairing" }
+# bignum = { tag = "v0.6.1", git = "https://github.com/noir-lang/noir-bignum" }
