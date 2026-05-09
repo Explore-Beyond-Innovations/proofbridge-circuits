@@ -1,10 +1,14 @@
 # Deposits Proof Circuit
 
-This is a Noir proof circuit that proves the inclusion of an order hash in a Merkle Mountain Range (MMR) **without revealing the secret used for nullifier generation**. The circuit validates that a specific order exists in the MMR and that the prover knows the corresponding secret for nullifier computation.
+This is a Noir proof circuit that produces a **succinct, on-chain-verifiable attestation** that an order hash is included in a Merkle Mountain Range (MMR) under a given root. The destination chain cannot read the source chain's state directly; this proof is what carries that cross-chain claim in a single fixed-size object.
 
-* We use **Poseidon2 hashing** for cryptographic operations and MMR proof verification.
-* The *actual* secret remains private; only its derived nullifier hash is provided publicly.
-* This design ensures privacy while proving order inclusion and preventing double-spending.
+The circuit binds three things together:
+
+1. **MMR inclusion** — the `order_hash` is in the tree under `target_root`.
+2. **Nullifier derivation** — the `nullifier_hash` is `poseidon2(secret_half, order_hash)`, so the on-chain contract can record it once and reject any replay.
+3. **Side flag** — `ad_contract` selects which half of the secret is hashed, so the same proof cannot be reused on the opposite side of the trade.
+
+We use **Poseidon2 hashing** for both the MMR and the nullifier derivation, so the on-chain MMR root can be referenced directly by the circuit without re-encoding. The destination chain treats the proof as cryptographic evidence of source-chain state; both chains' Verifiers consume the same fixed-size proof against the same verification key.
 
 ## Circuit Overview
 
@@ -168,17 +172,12 @@ target_root = "0x2da7e34cf373d78fa4e86575d42f5e694d6b81359ca164d8fab4cde05b48110
 
 ## Security Considerations
 
-### Privacy Guarantees
+### Replay and forgery resistance
 
-* **Secret Protection**: The 256-bit secret never leaves the prover's system
-* **Nullifier Unlinkability**: Different nullifiers are generated for different roles
-* **Order Privacy**: Only proves inclusion, not order contents
-
-### Attack Resistance
-
-* **Double-Spending Prevention**: Nullifiers ensure each secret can only be used once per order
-* **Replay Protection**: MMR root validation prevents stale proof acceptance
-* **Forgery Resistance**: Cryptographic commitments prevent unauthorized proof generation
+* **Double-spend prevention**: each `nullifier_hash` is recorded on-chain after the first successful settlement; subsequent proofs carrying the same value are rejected.
+* **Side-binding**: the `ad_contract` flag selects which half of the secret is hashed, so a proof valid on one side of the trade is not valid on the other.
+* **Stale-root rejection**: the proof is checked against the on-chain `target_root` of the opposite chain at unlock time; a proof generated against an outdated root won't verify because the root itself is a public input.
+* **Forgery resistance**: Poseidon2 commitments mean an attacker cannot fabricate a Merkle inclusion path for an `order_hash` that isn't actually in the tree, and cannot derive a matching `nullifier_hash` without the original `secret`.
 
 ### Proof Verification
 

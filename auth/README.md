@@ -1,10 +1,9 @@
 # Auth Proof Circuit
 
-This is a Noir proof circuit that proves a user is authorized to execute a trade intent **without revealing the signature itself**. The verifier only needs the **hash** of that secret signature.
+This is a Noir proof circuit that produces a **succinct, on-chain-verifiable attestation** that a user authorized a specific trade intent with their wallet key — without making the on-chain Verifier redo a full ECDSA verification per settlement.
 
-* We bind authorization to a user's **ECDSA key** (secp256k1).
-* The *actual* trade-intent signature remains private; only its hash is provided publicly.
-* This design avoids "passwords" and keeps the secret unique to the user.
+* Authorization is bound to a user's **ECDSA key** (secp256k1).
+* The Verifier checks a fixed-size SNARK proof; it never re-runs ECDSA verification on-chain — it just checks that the prover supplied a signature whose hash matches the trade intent's authorization commitment. This keeps on-chain verification cheap.
 
 ## Development Status
 
