@@ -1,227 +1,143 @@
 # Deposits Proof Circuit
 
-This is a Noir proof circuit that produces a **succinct, on-chain-verifiable attestation** that an order hash is included in a Merkle Mountain Range (MMR) under a given root. The destination chain cannot read the source chain's state directly; this proof is what carries that cross-chain claim in a single fixed-size object.
+A Noir circuit that produces a **succinct, on-chain-verifiable attestation** that an order is included
+in a Merkle Mountain Range (MMR) under a given root. The destination chain cannot read the source
+chain's state directly; this proof carries that cross-chain claim as a single fixed-size object.
 
 The circuit binds three things together:
 
-1. **MMR inclusion** — the `order_hash` is in the tree under `target_root`.
-2. **Nullifier derivation** — the `nullifier_hash` is `poseidon2(secret_half, order_hash)`, so the on-chain contract can record it once and reject any replay.
-3. **Side flag** — `ad_contract` selects which half of the secret is hashed, so the same proof cannot be reused on the opposite side of the trade.
+1. **MMR inclusion** — the order's leaf is in the tree committed by `target_root`.
+2. **Nullifier derivation** — `nullifier_hash = poseidon2(secret_half, order_hash)`, so the contract
+   records it once and rejects any replay.
+3. **Leaf-side binding** — the leaf encodes the trade side (`H(order_hash, side)`), so a proof built
+   for one side cannot be reused on the other.
 
-We use **Poseidon2 hashing** for both the MMR and the nullifier derivation, so the on-chain MMR root can be referenced directly by the circuit without re-encoding. The destination chain treats the proof as cryptographic evidence of source-chain state; both chains' Verifiers consume the same fixed-size proof against the same verification key.
+Everything uses **Poseidon2 over BN254**, so the on-chain MMR root is referenced directly by the
+circuit without re-encoding. Both chains' Verifiers consume the same fixed-size proof against the same
+verification key.
 
-## Circuit Overview
+## How inclusion is verified
 
-The deposits circuit performs two main validations:
-
-1. **Nullifier Verification**: Proves knowledge of a secret that generates the expected nullifier hash
-2. **MMR Inclusion Proof**: Validates that an order hash exists in the specified MMR at a given index
+The circuit does **not** re-derive the tree's shape. The prover supplies the navigation (path
+directions, parent node indexes, which peak, the leaf index, width, path length) as **untrusted
+hints**, and the circuit re-checks only the **hashes**: it climbs from the leaf to a peak and folds
+the peaks into the root. A wrong hint changes a hash, so the climb misses the real peak or the bagging
+misses the public `target_root`; forging inclusion would require a Poseidon2 collision. A set of
+structural asserts additionally pins the proof's shape (peak count, bounds, path length).
 
 ## Inputs
 
 ### Public inputs
 
-* `nullifier_hash: pub Field` — cryptographic commitment derived from the secret (prevents reuse, ensures uniqueness).
-* `order_hash: pub Field` — the order hash that must be proven to exist in the MMR.
-* `target_root: pub Field` — the expected MMR root hash for validation.
-* `ad_contract: pub bool` — determines nullifier computation method: if `true`, uses left half of secret; if `false`, uses right half.
+Order must match the contract's `RequestAuth.buildPublicInputs`: `[nullifier_hash, order_hash,
+target_root, ad_contract]`.
+
+* `nullifier_hash: pub Field` — replay guard derived from the secret.
+* `order_hash: pub Field` — the order being proven.
+* `target_root: pub Field` — the MMR root the proof is checked against (its authenticity is enforced
+  upstream by the root registry, not by this circuit).
+* `ad_contract: pub bool` — the side flag (`true` = ad side, `false` = order side). Drives both the
+  nullifier branch and the leaf-side binding.
 
 ### Private inputs
 
-* `secret: Field` — the private secret used for nullifier generation (256-bit value).
-* `target_index: Field` — the index position of the order hash in the MMR.
-* `target_elements_count: Field` — total number of elements in the MMR.
-* `target_sibling_hashes_len: Field` — number of sibling hashes in the inclusion proof (≤ 20).
-* `target_sibling_hashes: [Field; 20]` — array of sibling hashes for the inclusion proof path.
-* `target_peak_hashes_len: Field` — number of peak hashes in the MMR (≤ 20).
-* `target_peak_hashes: [Field; 20]` — array of MMR peak hashes for root reconstruction.
+* `secret: Field` — 256-bit secret for the nullifier.
+* `leaf_index: u32` — hint: absolute MMR node index of the leaf.
+* `width: u32` — hint: number of leaves.
+* `path_len: u32` — hint: number of climb steps (leaf to peak).
+* `siblings: [Field; 32]` — proof: sibling hash at each climb level.
+* `sib_is_left: [bool; 32]` — hint: at each level, whether the sibling is the left child.
+* `parent_index: [Field; 32]` — hint: parent node index at each level.
+* `peaks: [Field; 32]` — proof: peak hashes, high → low height order.
+* `peaks_len: u32` — hint: number of peaks.
+* `chosen_peak: u32` — hint: index into `peaks` of the leaf's mountain.
 
-## Cryptographic Design
+The hint fields are untrusted; soundness comes from the hash chain matching `target_root`.
 
-### Nullifier Generation
+## Cryptographic design
 
-The circuit splits the 256-bit secret into two 128-bit halves:
+### Nullifier
 
-```rust
-(a, b) = split_secret(secret)  // a = left 128 bits, b = right 128 bits
-```
+The 256-bit secret is split into two 128-bit halves: `(a, b) = split_secret(secret)`.
 
-Nullifier computation depends on the `ad_contract` flag:
-- **If `ad_contract` is true**: `nullifier_hash = poseidon2(a, order_hash)`
-- **If `ad_contract` is false**: `nullifier_hash = poseidon2(order_hash, b)`
+* `ad_contract == true` → `nullifier_hash = poseidon2(a, order_hash)`
+* `ad_contract == false` → `nullifier_hash = poseidon2(order_hash, b)`
 
-This dual-mode design allows different participants (ad creators vs. bridgers) to generate unique nullifiers from the same secret.
+### Leaf-side binding
 
-### MMR Verification Process
+The leaf payload is `value = poseidon2(order_hash, side)` where `side` is `1` (ad) or `0` (order), and
+the leaf node is `poseidon2(leaf_index, value)`. The same `side` drives the nullifier, so a proof for
+one side cannot satisfy the other. This must match the contract's `appendOrderHash(orderHash,
+sideFlag)`.
 
-1. **Peak Reconstruction**: Computes MMR peaks from the inclusion proof
-2. **Root Validation**: Reconstructs the MMR root from peaks and elements count
-3. **Inclusion Proof**: Verifies the order hash exists at the specified index
-4. **Peak Containment**: Ensures the computed peak exists in the provided peak set
+### MMR root
 
-## Prerequisites
+The root is `poseidon2(DOMAIN_TAG, size, acc)` where:
 
-* **Node.js** ≥ 18 and **pnpm**
-* **Noir / Nargo** (Noir CLI)
-* **Barretenberg CLI** (`bb`)
+* `size = 2 * width - popcount(width)` (derived in-circuit, never trusted from input),
+* `acc` folds the peaks (high → low), seeded by the first peak (a single size-bind),
+* `DOMAIN_TAG = keccak256("ProofBridge.MMR.v1") mod p`, a protocol/version tag that scopes a proof to
+  this MMR version. The same constant must be used by the contract and SDK.
 
-> Install Noir/Nargo and `bb` using the official instructions for your platform.
-> After installing, you should have `nargo --version` and `bb --version` working.
+## Build & run
 
-## Install JS dependencies
+Prerequisites: Node.js ≥ 18 + pnpm, Noir/Nargo, Barretenberg (`bb`).
 
 ```bash
 pnpm install
+nargo check                  # compile + validate the input schema
+./scripts/generate-inputs.sh # copy scripts/example.txt -> Prover.toml
+nargo execute                # produce the witness in ./target/
+
+# prove + verify
+bb prove     -b ./target/deposit_circuit.json -w ./target/deposit_circuit.gz -o ./target
+bb write_vk  -b ./target/deposit_circuit.json -o ./target
+bb verify    -k ./target/vk -p ./target/proof
 ```
 
-## Build & Check the Circuit
+`scripts/example.txt` is a valid sample in the current input format; edit it (or regenerate it from
+the SDK) to supply your own proof data. It must be kept in sync with the circuit's input shape.
 
-This compiles the circuit and prepares the target artifacts. It also ensures your input schema is valid.
+## Security considerations
 
-```bash
-nargo check
-```
+* **Replay**: each `nullifier_hash` is recorded on-chain after settlement; later proofs with the same
+  value are rejected.
+* **Side-binding**: the side is baked into the leaf, so a proof valid on one side is invalid on the other.
+* **Root authenticity**: the circuit proves inclusion in `target_root`; it does **not** prove that
+  `target_root` is a genuine counterpart-chain root — that is the root registry's job. A fabricated
+  tree only helps an attacker if its root passes the registry.
+* **Forgery resistance**: the hints cannot forge inclusion — a wrong hint breaks the hash chain and
+  fails to match a real peak / the public root, which would require a Poseidon2 collision. Structural
+  asserts (peak count == popcount, bounds, path length, leaf-mountain tie) pin the proof's shape.
+* **Version scoping**: `DOMAIN_TAG` makes a proof verify only against a ProofBridge-MMR-v1 root; bumping
+  the tag retires a version.
 
-## Provide Inputs
-
-We've included a helper and a human-readable reference:
-
-* `./scripts/example.txt` — example input values with proper formatting.
-* `./scripts/generate-inputs.sh` — copies example values to `Prover.toml`.
-
-Run:
-
-```bash
-./scripts/generate-inputs.sh
-```
-
-You can edit `./scripts/example.txt` to provide your own MMR proof data and secret values.
-
-> The secret should be a 256-bit value, and the nullifier hash should be computed according to the ad_contract flag.
-
-## Execute to Produce a Witness
-
-This computes the witness using your `Prover.toml` values.
-
-```bash
-nargo execute
-```
-
-This will create a witness artifact in `./target/`, commonly `./target/deposit_circuit.gz`.
-
----
-
-## Prove with Barretenberg
-
-Use `bb` with the ACIR and the witness:
-
-```bash
-# ACIR bytecode (JSON) and witness (.gz) are produced in ./target by nargo
-bb prove \
-  -b ./target/deposit_circuit.json \
-  -w ./target/deposit_circuit.gz \
-  -o ./target
-```
-
-This writes a proof artifact (e.g., `./target/proof` or similar, depending on your `bb` version).
-
-### Verify
-
-Generate a verification key, then verify the proof:
-
-```bash
-# Write a verification key from the ACIR
-bb write_vk -b ./target/deposit_circuit.json -o ./target
-
-# Verify the proof with the VK
-bb verify -k ./target/vk -p ./target/proof
-```
-
----
-
-## MMR Proof Requirements
-
-### Understanding MMR Structure
-
-Merkle Mountain Ranges (MMRs) are append-only binary trees optimized for efficient proofs:
-
-- **Peaks**: Top-level nodes of the MMR forest
-- **Elements Count**: Total number of leaf nodes in the MMR
-- **Root**: Hash of (elements_count || bagged_peaks)
-
-### Generating MMR Proofs
-
-To generate valid inputs for this circuit, you need:
-
-1. **Order Hash**: The specific order you want to prove inclusion for
-2. **MMR Index**: The position where the order hash was inserted
-3. **Sibling Path**: Hashes needed to reconstruct the path to a peak
-4. **Peak Set**: All current peaks of the MMR
-5. **Root**: The current MMR root hash
-
-### Example MMR Proof Structure
-
-```toml
-order_hash = "0x0a8bbf0df76dfb05ac821a820c19746de10bd651613a40f6719cbddbca50fd5a"
-target_index = "88929"                    # Position in MMR
-target_elements_count = "199994"          # Total leaves
-target_sibling_hashes_len = "16"          # Number of siblings
-target_peak_hashes_len = "6"              # Number of peaks
-target_root = "0x2da7e34cf373d78fa4e86575d42f5e694d6b81359ca164d8fab4cde05b48110f"
-```
-
-## Security Considerations
-
-### Replay and forgery resistance
-
-* **Double-spend prevention**: each `nullifier_hash` is recorded on-chain after the first successful settlement; subsequent proofs carrying the same value are rejected.
-* **Side-binding**: the `ad_contract` flag selects which half of the secret is hashed, so a proof valid on one side of the trade is not valid on the other.
-* **Stale-root rejection**: the proof is checked against the on-chain `target_root` of the opposite chain at unlock time; a proof generated against an outdated root won't verify because the root itself is a public input.
-* **Forgery resistance**: Poseidon2 commitments mean an attacker cannot fabricate a Merkle inclusion path for an `order_hash` that isn't actually in the tree, and cannot derive a matching `nullifier_hash` without the original `secret`.
-
-### Proof Verification
-
-The circuit ensures:
-1. Prover knows the secret corresponding to the nullifier hash
-2. Order hash exists at the claimed MMR index
-3. MMR proof is valid against the provided root
-4. All cryptographic operations use secure Poseidon2 hashing
-
-## Project Layout
+## Project layout
 
 ```text
 .
 ├─ src/
-│  ├─ main.nr               # main proof circuit logic
-│  ├─ utils.nr              # secret splitting utilities
-│  └─ mmr.nr                # MMR proof verification functions
+│  ├─ main.nr      # entrypoint: nullifier + leaf-side binding + inclusion
+│  ├─ utils.nr     # secret splitting
+│  └─ mmr.nr       # hash-only, hint-based MMR inclusion verification
 ├─ scripts/
-│  ├─ example.txt           # example input values
-│  └─ generate-inputs.sh    # input generation script
-├─ target/
-│  ├─ deposit_circuit.json  # compiled ACIR bytecode
-│  ├─ deposit_circuit.gz    # witness file
-│  ├─ vk                    # verification key
-│  └─ Verifier.sol          # Solidity verifier contract
-├─ Nargo.toml               # project configuration
-└─ Prover.toml              # input values (generated)
+│  ├─ example.txt           # sample inputs (current format)
+│  └─ generate-inputs.sh    # example.txt -> Prover.toml
+├─ target/                  # compiled ACIR, witness, vk, Verifier
+├─ Nargo.toml
+└─ Prover.toml              # inputs (generated)
 ```
 
-## Performance Notes
+## Performance
 
-**Proof Generation Time**: Currently ~1 minute 30 seconds (up from ~30 seconds previously)
-
-This performance regression is due to a necessary change in our MMR implementation. We were originally using a GNU-licensed MMR library, but the licensing issue was announced on Discord just this week. Without sufficient time to properly optimize a new implementation, we built a working MMR tree implementation from scratch 2 days ago that maintains correctness but needs optimization work.
-
-**Future Improvements**: The MMR implementation is functional and correct but still requires performance optimizations. This will be addressed in future updates to bring proof generation times back down.
+Proof circuit: ~17.8k gates (2¹⁵ dyadic); `bb prove` ~0.3s on a dev machine. The MMR inclusion is
+verified by re-checking hashes against prover-supplied navigation hints, which keeps the circuit small.
 
 ## Integration with ProofBridge
 
-This circuit is designed to work seamlessly with the ProofBridge protocol:
+* **Backend**: the relayer builds the proof inputs (including the hints) and manages secrets.
+* **Contracts**: the generated Solidity / Soroban verifiers are deployed on-chain.
+* **Cross-chain**: nullifiers prevent double-spending; `target_root` is authenticated by the root
+  registry before an unlock accepts the proof.
 
-* **Backend Integration**: The relayer service generates MMR proofs and manages secrets
-* **Contract Verification**: The generated Solidity verifier is deployed on-chain
-* **Cross-Chain Coordination**: Nullifiers prevent double-spending across different chains
-* **Privacy Preservation**: Order details remain private while proving valid inclusion
-
-For more information on the complete ProofBridge system, see the main repository documentation.
+For the full system, see the main repository documentation.
