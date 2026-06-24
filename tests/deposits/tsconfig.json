@@ -1,0 +1,14 @@
+{
+  "//": "Standalone config for the circuit test scripts; run via the SDK's ts-node (--project this file).",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["*.ts"]
+}
