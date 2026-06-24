@@ -5,7 +5,8 @@ mod mmr;
 
 // Deposit circuit: proves the nullifier preimage + that the order's leaf is in MMR(target_root).
 // Public inputs match RequestAuth.buildPublicInputs: [nullifier_hash, order_hash, target_root, ad_contract].
-// ad_contract is the side flag (1 = ad, 0 = order); it drives the nullifier branch and the leaf binding.
+// ad_contract is the side flag - the side the leaf is unlocked on (1 = ad, 0 = order), not the contract
+// that appends it; it drives the nullifier branch and the leaf binding.
 fn main(
     nullifier_hash: pub Field,
     order_hash: pub Field,
