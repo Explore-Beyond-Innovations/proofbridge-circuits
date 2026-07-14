@@ -9,7 +9,7 @@ import {
   Poseidon2Hasher,
   Side,
   encodeLeaf,
-} from "proofbridge-mmr";
+} from "../../../packages/proofbridge_mmr/src";
 import * as fs from "fs";
 import * as path from "path";
 
