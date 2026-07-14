@@ -2,13 +2,15 @@
 // Prover.toml + an untagged-root sidecar into the circuit dir. Run via the SDK's ts-node
 // (see test-sdk-e2e.sh / adversarial-tests.sh). Imports the SDK by relative path so it needs no
 // node_modules of its own.
-import { MerkleMountainRange } from "../../../packages/proofbridge_mmr/src/core/mmr";
-import { Poseidon2Hasher } from "../../../packages/proofbridge_mmr/src/crypto/hasher";
-import { DOMAIN_TAG } from "../../../packages/proofbridge_mmr/src/core/constants";
-import { encodeLeaf, Side } from "../../../packages/proofbridge_mmr/src/utils/leaf";
-import LevelDB from "../../../packages/proofbridge_mmr/src/storage/store";
+import {
+  DOMAIN_TAG,
+  MemoryStore,
+  MerkleMountainRange,
+  Poseidon2Hasher,
+  Side,
+  encodeLeaf,
+} from "proofbridge-mmr";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 
 const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
@@ -19,12 +21,8 @@ const DOMAIN = bufToBig(DOMAIN_TAG);
 const CIRCUIT = path.join(__dirname, "..", "..", "deposits");
 
 async function main() {
-  const dir = path.join(os.tmpdir(), "pbmmr-fixture");
-  fs.rmSync(dir, { recursive: true, force: true });
-  const db = new LevelDB(dir);
-  await db.init();
   const hasher = new Poseidon2Hasher();
-  const mmr = new MerkleMountainRange("fixture", db, hasher);
+  const mmr = new MerkleMountainRange("fixture", new MemoryStore(), hasher);
   await mmr.init();
 
   // each leaf payload = poseidon2(orderHash, side) via the SDK's encodeLeaf (leaf-side binding)
