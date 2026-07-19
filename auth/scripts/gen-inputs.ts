@@ -1,15 +1,6 @@
-// Auth circuit input helper (issue #164).
-//
-// Builds the root-bound SettlementAuth message, aggregates the maker + bridger
-// BLS12-381 signatures, and emits a Prover.toml for proof_circuits/auth. Uses the
-// exact production suite: minimal-pubkey-size (pk G1 / sig G2), DST_SIG, and the
-// same 192-byte SETTLE_TAG-prefixed preimage the on-chain CounterpartyVerifier
-// rebuilds. Kept dependency-light (@noble/curves only) so it runs standalone.
-//
-// Usage:
-//   tsx gen-inputs.ts <case> > ../<out>.toml
-// where <case> is one of: valid | single-signer | invalid-sig | wrong-pubkey.
-// Cases and their expected circuit behaviour are documented in fixtures/.
+// Builds the SettlementAuth message, aggregates two BLS signatures, and emits a
+// Prover.toml for auth_circuit. Same noble path as the relayer / scripts/bls-vectors.
+//   tsx gen-inputs.ts <valid|single-signer|invalid-sig|wrong-pubkey> > out.toml
 
 import { bls12_381 as bls } from "@noble/curves/bls12-381";
 import { keccak_256 } from "@noble/hashes/sha3";
@@ -19,10 +10,9 @@ const blsSigs = bls.longSignatures;
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const hex = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
 
-// Production constants (see docs/engineering/t1/1.2-build/01-bls-encodings.md).
+// Constants per docs/engineering/t1/1.2-build/01-bls-encodings.md.
 const SETTLE_TAG = keccak_256(utf8("ProofBridge.Settlement.v1"));
 const DST_SIG = "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_";
-// sepolia / stellar-testnet chain ids from the encodings spec.
 const ORDER_CHAIN_ID = 11155111n;
 const AD_CHAIN_ID = 1000001n;
 
@@ -53,8 +43,7 @@ function skFromLabel(label: string): Uint8Array {
   return be((h % (order - 1n)) + 1n, 32);
 }
 
-// SETTLE_TAG || orderChainId(32) || adChainId(32) || orderHash || orderChainRoot
-// || adChainRoot -- fixed 192 bytes, identical to buildSettlementPreimage.
+// Fixed 192 bytes, identical to the relayer's buildSettlementPreimage.
 export function settlementPreimage(): Uint8Array {
   const p = concat(
     SETTLE_TAG,
@@ -96,27 +85,23 @@ export function proverToml(kase: Case): string {
   ]);
 
   if (kase === "single-signer") {
-    // Degenerate but valid: one key fills both slots. pk_agg = 2*pk, agg = 2*sig,
-    // and e(2*pk, H) == e(g1, 2*sig) still holds -> the circuit must accept it.
+    // Degenerate but valid: one key fills both slots (pk_agg = 2*pk, agg = 2*sig).
     pkAgg = blsSigs.aggregatePublicKeys([makerPk, makerPk]);
     aggSig = blsSigs.aggregateSignatures([
       blsSigs.sign(msgG2, makerSk),
       blsSigs.sign(msgG2, makerSk),
     ]);
   } else if (kase === "invalid-sig") {
-    // Bridger signs a DIFFERENT message; the aggregate no longer matches msgG2
-    // -> the pairing check must fail (witness unsatisfiable).
+    // Bridger signs a different message, so the aggregate no longer matches msgG2.
     const wrong = blsSigs.hash(concat(preimage, utf8("x")), DST_SIG);
     aggSig = blsSigs.aggregateSignatures([
       blsSigs.sign(msgG2, makerSk),
       blsSigs.sign(wrong, bridgerSk),
     ]);
   } else if (kase === "wrong-pubkey") {
-    // Aggregate signature is correct, but pk_agg is a different key -> fail.
     pkAgg = blsSigs.aggregatePublicKeys([makerPk, blsSigs.getPublicKey(skFromLabel("attacker.sk"))]);
   }
 
-  // Self-check the positive cases so the generator never emits a bad "valid" fixture.
   const shouldVerify = kase === "valid" || kase === "single-signer";
   const verifies = blsSigs.verify(aggSig, msgG2, pkAgg);
   if (shouldVerify && !verifies) throw new Error(`case ${kase}: expected verify, got reject`);

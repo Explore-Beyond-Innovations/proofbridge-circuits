@@ -1,32 +1,10 @@
 use bls12_381::{Fp2, G1Affine, G2Affine, verify_bls_signature};
 
-// ProofBridge auth circuit (issue #157 / #163).
-//
-// Proves that the aggregated maker + bridger BLS12-381 signature is valid over
-// the root-bound SettlementAuth message, i.e. that both counterparties consented
-// to this settlement (order_hash + order_chain_root + ad_chain_root are all bound
-// through the message point). Minimal-pubkey-size suite: pubkeys in G1, signature
-// and hashed message in G2. verify_bls_signature checks
-//   e(-g1, agg_sig) * e(pk_agg, H(m)) == 1
-// as one shared Miller loop + one final exponentiation.
-//
-// Public inputs:
-//   pk_agg  = pk_maker + pk_bridger, the aggregated G1 public key. The consumer
-//             binds it to the two registry-committed keys (keccak256(pk) == keyOf).
-//   msg     = H(m) = hash_to_g2(SettlementAuth preimage, DST_SIG), the hashed
-//             settlement message in G2. The preimage is
-//             SETTLE_TAG || orderChainId || adChainId || orderHash || orderChainRoot ||
-//             adChainRoot (192 bytes); binding msg to those roots is the whole
-//             point of the proof, so msg is public.
-// Private input:
-//   agg_sig = the aggregated G2 signature.
-//
-// Scope notes (see README): hash-to-curve and G1 key aggregation are done
-// off-circuit (matching the native on-chain CounterpartyVerifier path), and this
-// circuit does NOT subgroup-check agg_sig. Those checks are provided natively by
-// the EIP-2537 / Soroban BLS operations that consume the same published points.
-// A future "replace the native pairing" use would add an in-circuit G2 subgroup
-// check on agg_sig.
+// Verifies the aggregated maker+bridger BLS signature over the SettlementAuth
+// message. Minimal-pubkey-size: pk in G1, sig and msg in G2. pk_agg and msg
+// (= hash_to_g2 of the SettlementAuth preimage) are aggregated/hashed off-circuit
+// and bound by the consumer; agg_sig is not subgroup-checked here; the native
+// BLS path that consumes the same points does that. See README.
 fn main(
     pk_agg_x: pub [u128; 4],
     pk_agg_y: pub [u128; 4],

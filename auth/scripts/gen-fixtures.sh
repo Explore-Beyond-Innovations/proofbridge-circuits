@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Regenerate the 4-case fixture Prover.toml files (issue #165).
-# Run from proof_circuits/auth/scripts after `pnpm install`.
+# Regenerate the 4-case fixture Prover.toml files. Run after `pnpm install`.
 
 cd "$(dirname "$0")"
 mkdir -p ../fixtures

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
-# 4-case circuit test pack (issue #165): solve the witness for each fixture and
-# assert the expected pass/fail. valid + single-signer must solve; invalid-sig +
-# wrong-pubkey must be rejected by the in-circuit pairing check.
+# Solve the witness for each fixture and assert the expected pass/fail.
+# valid + single-signer must solve; invalid-sig + wrong-pubkey must be rejected.
 
 cd "$(dirname "$0")/.."   # proof_circuits/auth
 export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"

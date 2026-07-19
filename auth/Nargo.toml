@@ -5,8 +5,4 @@ authors = [""]
 compiler_version = ">=1.0.0"
 
 [dependencies]
-# BLS12-381 pairing + aggregate-signature verification.
-# Sibling fork (like solidity-mmr): source lives at ../../../noir-bls-library.
-# Once that fork is pushed + tagged, switch to the git form:
-#   bls12_381 = { git = "https://github.com/Explore-Beyond-Innovations/noir-bls-library", tag = "vX.Y.Z" }
-bls12_381 = { path = "../../../noir-bls-library" }
+bls12_381 = { tag = "v0.1.0", git = "https://github.com/Explore-Beyond-Innovations/noir-bls-library" }
