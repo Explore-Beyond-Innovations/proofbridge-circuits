@@ -1,0 +1,18 @@
+{
+  "name": "@proofbridge/auth-circuit-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Input + fixture generator for the BLS auth circuit (proof_circuits/auth)",
+  "scripts": {
+    "gen": "tsx gen-inputs.ts",
+    "fixtures": "bash gen-fixtures.sh",
+    "test": "bash run-fixtures.sh"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.0.0",
+    "@noble/hashes": "^2.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

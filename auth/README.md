@@ -1,172 +1,95 @@
-# Auth Proof Circuit
+# Auth Proof Circuit (BLS aggregate)
 
-This is a Noir proof circuit that produces a **succinct, on-chain-verifiable attestation** that a user authorized a specific trade intent with their wallet key — without making the on-chain Verifier redo a full ECDSA verification per settlement.
+A Noir/UltraHonk circuit that proves an **aggregated maker + bridger BLS12-381
+signature** is valid over the root-bound **SettlementAuth** message — i.e. that
+both counterparties consented to a specific settlement. It is the ZK form of the
+consensus check that the on-chain `CounterpartyVerifier` performs natively.
 
-* Authorization is bound to a user's **ECDSA key** (secp256k1).
-* The Verifier checks a fixed-size SNARK proof; it never re-runs ECDSA verification on-chain — it just checks that the prover supplied a signature whose hash matches the trade intent's authorization commitment. This keeps on-chain verification cheap.
+> **Status: building block, not wired into the settlement path.** Today's T1
+> unlock verifies the aggregate BLS signature natively on-chain (EIP-2537
+> precompiles / Soroban `bls12_381` host functions) and the unlock ZK proof only
+> attests deposit inclusion. This circuit is foundational work (issue #157, subs
+> #163–#166) for a future context that folds BLS consensus into a ZK proof —
+> e.g. replacing the native pairing to save gas, or T2 composition. It is
+> **implemented but not consumed** by any contract or the relayer yet.
 
-## Development Status
+## What it proves
 
-### Current Status
+Minimal-pubkey-size suite (pubkeys in G1; signature and hashed message in G2),
+matching `@proofbridge/bls-encodings` and `01-bls-encodings.md`. The circuit calls
+`verify_bls_signature`, which checks
 
-**ECDSA implementation is not currently active** due to prohibitively large proof sizes generated in combination with deposit verification for the zero-knowledge circuits.
+```
+e(-g1, agg_sig) * e(pk_agg, H(m)) == 1
+```
 
-### In Development
+as one shared Miller loop plus a single final exponentiation.
 
-**BLS signature aggregation and consensus mechanisms** using BN254 curves for trade fulfillment consensus between bridgers and ad creators. This is part of the project milestones and represents the primary authentication approach moving forward.
+### Inputs (`src/main.nr`)
 
-#### BLS Trade Consensus Design
+**Public**
+- `pk_agg` — the aggregated G1 public key (`pk_maker + pk_bridger`). The consumer
+  binds it to the registry commitments (`keccak256(pk) == keyOf(account)`).
+- `msg` — `H(m) = hash_to_g2(preimage, DST_SIG)`, the hashed SettlementAuth
+  message in G2. The preimage is the production 192-byte layout
+  `SETTLE_TAG || orderChainId || adChainId || orderHash || orderChainRoot ||
+  adChainRoot`. Binding `msg` to those roots is the point of the proof, so it is
+  public.
 
-**Objective**: Aggregate bridger and ad creator signatures as cryptographic consensus for trade fulfillment, integrated with deposit proofs for complete transaction validation.
+**Private**
+- `agg_sig` — the aggregated G2 signature.
 
-**Key Features:**
+All curve coordinates are 4×120-bit `u128` limbs (noir-bignum layout).
 
-* **Dual-Party Consensus**: Combines bridger and ad creator BLS signatures into a single aggregated proof
-* **Trade Fulfillment Validation**: Cryptographic consensus that both parties agree to trade execution
-* **Deposit Proof Integration**: BLS consensus proof will be combined with MMR inclusion proofs from the deposits circuit
-* **Atomic Settlement**: Ensures both authentication and deposit validation in a unified ZK proof system
-* **BN254 Optimization**: Leverages BN254 curve for efficient pairing operations in zero-knowledge circuits
+### Deliberately out of scope
 
-#### Integration with Deposits Circuit
+- **Hash-to-curve** and **G1 key aggregation** are done off-circuit (by the helper
+  below and natively on-chain), so `msg` and `pk_agg` arrive ready-made. Doing
+  RFC 9380 `hash_to_g2` in-circuit would be prohibitively large.
+- **No G2 subgroup check** on `agg_sig`. The native EIP-2537 / Soroban BLS ops
+  that consume the same published points subgroup-check them. A future
+  "replace the native pairing" use must add an in-circuit check (endomorphism /
+  Bowe–Scott `ψ(P) == [z]P`); until then the proof is only sound alongside a
+  native check that subgroup-validates the signature.
 
-The BLS consensus mechanism will work in conjunction with the deposits proof circuit:
+## Dependency
 
-1. **Deposit Validation**: Deposits circuit proves order inclusion in MMR
-2. **Consensus Validation**: BLS aggregation proves both parties consent to fulfillment
-3. **Combined Proof**: Single ZK proof validates both deposit existence and trade consensus
-4. **Cross-Chain Settlement**: Unified proof enables atomic settlement across chains
+Built on the `bls12_381` library (`Nargo.toml`), a ProofBridge fork of
+`critesjosh/noir-bls-signature` pinned to `noir-bignum v0.7.3` so it compiles on
+the repo toolchain (`nargo 1.0.0-beta.9` + `bb v0.87.0`). It is consumed as a
+**sibling path dependency** (`../../../noir-bls-library`), like `solidity-mmr`;
+once that fork is pushed and tagged, switch `Nargo.toml` to the `git` + `tag`
+form noted there.
 
-#### Technical Implementation
-
-* **Signature Aggregation**: `BLS_Aggregate(bridger_sig, ad_creator_sig) → consensus_sig`
-* **Consensus Verification**: Validates aggregated signature against trade parameters
-* **Proof Composition**: Combines BLS consensus with MMR inclusion proofs
-* **Gas Efficiency**: Single proof verification instead of multiple signature checks
-
-#### Development Roadmap
-
-* **Current Focus**: BLS aggregation for bridger + ad creator consensus (milestone deliverable)
-* **Next Phase**: Unified proof system combining BLS consensus with deposit validation
-* **Final Phase**: Full integration with cross-chain settlement protocol
-
-#### Why BLS Over ECDSA
-
-* **Proof Size**: ECDSA signature verification generates prohibitively large ZK proofs
-* **Efficiency**: BLS signatures are more efficient in zero-knowledge circuits
-* **Aggregation**: BLS naturally supports signature aggregation for consensus
-* **BN254 Compatibility**: BLS on BN254 curve is optimized for ZK proof systems
-
-> **Note**: Development has shifted focus to BLS consensus mechanisms due to proof size constraints with ECDSA. BLS consensus is part of the project milestones and will be integrated with the deposits circuit to provide complete trade validation in a single ZK proof.
-
-## Inputs
-
-### Public inputs
-
-* `nullifier_hash: pub Field` — hash of the private signature/secret (prevents reuse, links proof to intent).
-* `ad_creator: pub Field` — ad creator address.
-* `bridger: pub Field` — bridger address.
-* `msg_hash: pub [u8; 32]` — 32-byte message hash associated with the intent.
-* `ad_contract: pub bool` — if `true`, the **bridger** provides `nullifier_hash`; if `false`, the **ad_creator** provides it.
-
-### Private inputs
-
-* `ad_creator_pub_key: [u8; 65]` — uncompressed secp256k1 pubkey: `0x04 || X(32) || Y(32)`.
-* `ad_creator_sig: [u8; 64]` — ECDSA signature **RS** only (drop `V`).
-* `bridger_pub_key: [u8; 65]` — uncompressed secp256k1 pubkey.
-* `bridger_sig: [u8; 64]` — ECDSA signature **RS** only (drop `V`).
-
-> ℹ️ If your tool returns a 64-byte public key (just `X||Y`), prepend `0x04` to make it 65 bytes.
-
-## Prerequisites
-
-* **Node.js** ≥ 18 and **pnpm**
-* **Noir / Nargo** (Noir CLI)
-* **Barretenberg CLI** (`bb`)
-
-> Install Noir/Nargo and `bb` using the official instructions for your platform.
-> After installing, you should have `nargo --version` and `bb --version` working.
-
-## Install JS dependencies
+## Build
 
 ```bash
-pnpm install
+# compile + verification key (both chains); add --prove to also prove
+scripts/build_circuits.sh proof_circuits/auth
 ```
 
-## Build & Check the Circuit
+Artifacts land in `target/`: `auth_circuit.json` (ACIR), `vk` (+ `vk_fields.json`)
+for the reusable Soroban verifier, and `AuthVerifier.sol` for EVM (both generated
+with `--oracle_hash keccak`).
 
-This compiles the circuit and prepares the target artifacts. It also ensures your input schema is valid (and typically generates/refreshes `Prover.toml` if you use Noir’s input annotations).
+## Inputs & fixtures
 
 ```bash
-nargo check
+cd scripts && pnpm install
+pnpm gen valid > ../fixtures/valid.toml   # build a Prover.toml for one case
+pnpm fixtures                             # regenerate all four fixtures
+pnpm test                                 # solve each and assert pass/fail
 ```
 
-## Provide Inputs
+The helper (`scripts/gen-inputs.ts`, #164) assembles the SettlementAuth preimage,
+signs with two deterministic keys, aggregates, and emits limb-encoded inputs — the
+same noble code path as the relayer and `scripts/bls-vectors`. The four fixtures
+(#165) are documented in `fixtures/README.md`.
 
-We've included a helper and a human-readable reference:
+## Performance
 
-* `./scripts/inputs.txt` — a readable checklist of the required inputs.
-* `./generate-inputs.sh` — fills `Prover.toml` with values based of data in inputs.txt.
-
-Run:
-
-```bash
-./scripts/generate-inputs.sh
-```
-
-You can edit `./scripts/inputs.txt` to point at your own generated pubkeys/signatures.
-
-> The nullifier hash will be generated in the script based on the ad_contract value.
-
-## Execute to Produce a Witness
-
-This computes the witness using your `Prover.toml` values.
-
-```bash
-nargo execute
-```
-
-This will create a witness artifact in `./target/`, commonly `./target/<package>.gz`.
-
----
-
-## Prove with Barretenberg
-
-Use `bb` with the ACIR and the witness:
-
-```bash
-# ACIR bytecode (JSON) and witness (.gz) are produced in ./target by nargo
-bb prove \
-  -b ./target/proof_circuit.json \
-  -w ./target/proof_circuit.gz \
-  -o ./target
-```
-
-This writes a proof artifact (e.g., `./target/proof` or similar, depending on your `bb` version).
-
-### Verify
-
-Generate a verification key, then verify the proof:
-
-```bash
-# Write a verification key from the ACIR
-bb write_vk -b ./target/proof_circuit.json -o ./target
-
-# Verify the proof with the VK
-bb verify -k ./target/vk -p ./target/proof
-```
-
----
-
-## Project Layout
-
-```text
-.
-├─ src/
-|  |─ main.nr               # proof circuit
-│  └─ utils.nr              # helper mod to split publickeys
-├─ scripts/
-│  ├─ inputs.txt            # readable input 
-|  |─ hash.ts               # helper script to hash nullifier
-│  └─ generate-inputs.sh    # populates Prover.toml
-├─ Nargo.toml               
-```
+On a 20-core/30GB machine the aggregate verify is ~4.19M UltraHonk gates,
+~28s `bb prove`, ~8GB. The #157 target of ≤30s on an 8-core/16GB reference
+machine is not met on this toolchain generation (BLS12-381 pairing emulated over
+BN254); expect ~2× that on the reference box. Revisit after the deferred `bb`
+upgrade, or trim further with the reserved field-tower optimizations.
