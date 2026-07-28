@@ -1,0 +1,68 @@
+name: Circuits CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "auth/**"
+      - "deposits/**"
+      - "tests/**"
+      - "scripts/build_circuits.sh"
+      - ".github/workflows/circuits.yml"
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  deposit-circuit:
+    name: Deposit circuit — gates + soundness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      # The fixture generator (tests/deposits/gen-fixture.ts) imports the SDK by
+      # relative path: ../../../packages/proofbridge_mmr/src — i.e. a `packages/`
+      # directory NEXT TO this checkout (in the ProofBridge monorepo that's the
+      # workspace package). Here we unpack the published npm tarball there and
+      # shim src/ to re-export dist/.
+      - name: Fetch proofbridge-mmr SDK
+        run: |
+          set -euo pipefail
+          SDK_PARENT="$(dirname "$GITHUB_WORKSPACE")/packages"
+          mkdir -p "$SDK_PARENT"
+          npm pack proofbridge-mmr@1.2.1
+          tar -xzf proofbridge-mmr-1.2.1.tgz
+          rm proofbridge-mmr-1.2.1.tgz
+          mv package "$SDK_PARENT/proofbridge_mmr"
+          cd "$SDK_PARENT/proofbridge_mmr"
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund ts-node typescript @types/node
+          mkdir -p src
+          printf 'export * from "../dist";\n' > src/index.ts
+
+      # Installs nargo + bb and adds them to PATH for later steps.
+      - name: Build deposit circuit
+        run: scripts/build_circuits.sh deposits
+
+      # Regression tripwire: the deposit proof regressed to ~90s once because the gate count ballooned.
+      # Fail fast if the lean circuit grows past its bound (prove time tracks the gate/dyadic size).
+      - name: Gate-count tripwire
+        run: |
+          export PATH="$HOME/.bb/bin:$PATH"
+          gates=$(bb gates -b deposits/target/deposit_circuit.json | jq '.functions[0].circuit_size')
+          limit=20000
+          echo "deposit circuit gate count: $gates (limit $limit)"
+          [ "$gates" -le "$limit" ] || { echo "::error::gate count $gates exceeds $limit — proving will regress (milestone 1.3)"; exit 1; }
+
+      # Soundness: regenerate a real SDK fixture, confirm the valid proof is accepted and every forgery
+      # (wrong side, domainstrip, forged/reordered peaks, OOB index, ...) is rejected.
+      - name: Adversarial (forgery) suite
+        run: |
+          export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
+          ./adversarial-tests.sh
+        working-directory: tests/deposits

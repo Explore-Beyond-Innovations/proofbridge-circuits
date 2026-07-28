@@ -1,0 +1,10 @@
+node_modules/
+target/
+out/
+dist/
+
+# local benchmark circuits
+_bench/
+
+# local working notes
+CLAUDE.md
