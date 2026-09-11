@@ -2,3 +2,4 @@ target/
 Prover.toml
 Prover.valid.toml
 untagged_root.txt
+Prover_d*.toml

@@ -1,4 +1,4 @@
-# Deposits Proof Circuit
+# Event Proof Circuit
 
 A Noir circuit that produces a **succinct, on-chain-verifiable attestation** that an order is included
 in a Merkle Mountain Range (MMR) under a given root. The destination chain cannot read the source
@@ -7,10 +7,11 @@ chain's state directly; this proof carries that cross-chain claim as a single fi
 The circuit binds three things together:
 
 1. **MMR inclusion** — the order's leaf is in the tree committed by `target_root`.
-2. **Nullifier derivation** — `nullifier_hash = poseidon2(secret_half, order_hash)`, so the contract
-   records it once and rejects any replay.
-3. **Leaf-side binding** — the leaf encodes the trade side (`H(order_hash, side)`), so a proof built
-   for one side cannot be reused on the other.
+2. **Nullifier derivation** (deposits, domains 0/1) — `nullifier_hash = poseidon2(secret_half,
+   order_hash)`, so the contract records it once and rejects any replay. Event claims (domains 2+:
+   cancel, settled, registered) need no secret and carry `nullifier_hash = 0`.
+3. **Leaf-domain binding** — the leaf encodes its domain (`H(order_hash, leaf_domain)`), so a proof
+   built for one side or kind of leaf cannot be reused for another.
 
 Everything uses **Poseidon2 over BN254**, so the on-chain MMR root is referenced directly by the
 circuit without re-encoding. Both chains' Verifiers consume the same fixed-size proof against the same
@@ -29,19 +30,20 @@ structural asserts additionally pins the proof's shape (peak count, bounds, path
 
 ### Public inputs
 
-Order must match the contract's `RequestAuth.buildPublicInputs`: `[nullifier_hash, order_hash,
-target_root, ad_contract]`.
+`[nullifier_hash, order_hash, target_root, leaf_domain]`, always written by the contract:
+`RequestAuth.buildPublicInputs` for deposits, `buildEventInputs` for event claims.
 
-* `nullifier_hash: pub Field` — replay guard derived from the secret.
-* `order_hash: pub Field` — the order being proven.
+* `nullifier_hash: pub Field` — deposits: the replay guard derived from the secret. Event claims: `0`.
+* `order_hash: pub Field` — the order being proven (for `REGISTERED`, that leaf's subject digest).
 * `target_root: pub Field` — the MMR root the proof is checked against (its authenticity is enforced
   upstream by the root registry, not by this circuit).
-* `ad_contract: pub bool` — the side flag (`true` = ad side, `false` = order side). Drives both the
-  nullifier branch and the leaf-side binding.
+* `leaf_domain: pub Field` — what the leaf records. `1` ad-side deposit, `0` order-side deposit (both
+  prove the secret), `2` cancel, `3` settled, `4` registered (event claims: no secret). Drives the
+  nullifier branch and the leaf binding.
 
 ### Private inputs
 
-* `secret: Field` — 256-bit secret for the nullifier.
+* `secret: Field` — 256-bit secret for the nullifier (ignored for event claims).
 * `leaf_index: u32` — hint: absolute MMR node index of the leaf.
 * `width: u32` — hint: number of leaves.
 * `path_len: u32` — hint: number of climb steps (leaf to peak).
@@ -60,15 +62,16 @@ The hint fields are untrusted; soundness comes from the hash chain matching `tar
 
 The 256-bit secret is split into two 128-bit halves: `(a, b) = split_secret(secret)`.
 
-* `ad_contract == true` → `nullifier_hash = poseidon2(a, order_hash)`
-* `ad_contract == false` → `nullifier_hash = poseidon2(order_hash, b)`
+* `leaf_domain == 1` → `nullifier_hash = poseidon2(a, order_hash)`
+* `leaf_domain == 0` → `nullifier_hash = poseidon2(order_hash, b)`
+* any other domain → `nullifier_hash == 0`: an event claim can neither carry nor consume a nullifier
 
-### Leaf-side binding
+### Leaf-domain binding
 
-The leaf payload is `value = poseidon2(order_hash, side)` where `side` is `1` (ad) or `0` (order), and
-the leaf node is `poseidon2(leaf_index, value)`. The same `side` drives the nullifier, so a proof for
-one side cannot satisfy the other. This must match the contract's `appendOrderHash(orderHash,
-sideFlag)`.
+The leaf payload is `value = poseidon2(order_hash, leaf_domain)` and the leaf node is
+`poseidon2(leaf_index, value)`. The same domain drives the nullifier, so a proof for one side cannot
+satisfy the other, a deposit leaf cannot be claimed as an event, and an event cannot unlock funds.
+This must match the contract's `appendOrderHash(orderHash, domain)`.
 
 ### MMR root
 
@@ -90,8 +93,8 @@ nargo check                  # compile + validate the input schema
 nargo execute                # produce the witness in ./target/
 
 # prove + verify
-bb prove     -b ./target/deposit_circuit.json -w ./target/deposit_circuit.gz -o ./target
-bb write_vk  -b ./target/deposit_circuit.json -o ./target
+bb prove     -b ./target/event_circuit.json -w ./target/event_circuit.gz -o ./target
+bb write_vk  -b ./target/event_circuit.json -o ./target
 bb verify    -k ./target/vk -p ./target/proof
 ```
 

@@ -3,15 +3,15 @@ use poseidon::poseidon2;
 mod utils;
 mod mmr;
 
-// Deposit circuit: proves the nullifier preimage + that the order's leaf is in MMR(target_root).
-// Public inputs match RequestAuth.buildPublicInputs: [nullifier_hash, order_hash, target_root, ad_contract].
-// ad_contract is the side flag - the side the leaf is unlocked on (1 = ad, 0 = order), not the contract
-// that appends it; it drives the nullifier branch and the leaf binding.
+// Proves the leaf poseidon2(order_hash, leaf_domain) is in MMR(target_root).
+// Public inputs: [nullifier_hash, order_hash, target_root, leaf_domain], always written by the contract.
+// Domains 0/1 are deposits (the side the leaf is unlocked on: 1 = ad, 0 = order) and prove the
+// nullifier preimage; 2+ are event claims (cancel, settled, registered): no secret, nullifier = 0.
 fn main(
     nullifier_hash: pub Field,
     order_hash: pub Field,
     target_root: pub Field, // authenticated upstream by the root registry
-    ad_contract: pub bool,
+    leaf_domain: pub Field,
     secret: Field,
     leaf_index: u32,
     width: u32,
@@ -23,18 +23,18 @@ fn main(
     peaks_len: u32,
     chosen_peak: u32,
 ) {
-    // --- nullifier: prove knowledge of one half of the split secret ---
+    // --- nullifier: deposits prove one half of the split secret; events carry none ---
     let (a, b) = utils::split_secret(secret);
-    if ad_contract {
+    if leaf_domain == 1 {
         assert(poseidon2::Poseidon2::hash([a, order_hash], 2) == nullifier_hash);
-    } else {
+    } else if leaf_domain == 0 {
         assert(poseidon2::Poseidon2::hash([order_hash, b], 2) == nullifier_hash);
+    } else {
+        assert(nullifier_hash == 0, "event claims carry no nullifier");
     }
 
-    // --- leaf-side binding (closes X-1): the leaf encodes the trade side ---
-    // side = 1 (ad) / 0 (order); must match the contract's appendOrderHash(orderHash, sideFlag).
-    let side: Field = ad_contract as Field;
-    let value = poseidon2::Poseidon2::hash([order_hash, side], 2);
+    // --- leaf-domain binding (closes X-1): must match appendOrderHash(orderHash, domain) ---
+    let value = poseidon2::Poseidon2::hash([order_hash, leaf_domain], 2);
 
     // --- inclusion: value is in the MMR committed by target_root (hash-only, hint-driven) ---
     mmr::verify_inclusion(
