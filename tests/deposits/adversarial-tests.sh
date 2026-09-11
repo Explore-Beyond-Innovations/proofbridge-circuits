@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Adversarial / forgery suite for the deposit circuit. Generates a REAL proof from the SDK, confirms
-# the valid proof is accepted, then applies each forgery mutation (sed-based) and confirms every one
-# is REJECTED. Exits non-zero if the valid proof is rejected or any forgery is accepted.
+# Adversarial / forgery suite for the deposit circuit. Generates REAL claims from the SDK (one tree with
+# leaves of every domain), confirms valid deposits (domains 0, 1) and event claims (2, 3, 4) are
+# accepted, then applies each forgery mutation (sed-based) and confirms every one is REJECTED.
 #
 # Run: ./adversarial-tests.sh    (from proof_circuits/tests)
 #
@@ -12,11 +12,17 @@ CIRCUIT="$TESTS/../../deposits"
 SDK="$TESTS/../../../packages/proofbridge_mmr"
 FAKE='0x00000000000000000000000000000000000000000000000000000000deadbeef'
 
-# Apply forgery $1 to Prover.valid.toml -> Prover.toml (in the circuit dir). Each forges one part of a real proof.
+# Apply forgery $1 to a valid file -> Prover.toml (in the circuit dir). Each forges one part of a real proof.
+# Deposit cases start from the domain-1 fixture; ev* cases from the domain-2 event claim.
 mutate() {
-  cp Prover.valid.toml Prover.toml
+  case "$1" in ev*) cp Prover_d2.toml Prover.toml ;; *) cp Prover.valid.toml Prover.toml ;; esac
   case "$1" in
-    side)         sed -i 's/ad_contract = true/ad_contract = false/' Prover.toml ;;              # wrong side
+    side)         sed -i 's/leaf_domain = "1"/leaf_domain = "0"/' Prover.toml ;;                 # wrong side
+    asevent)      sed -i 's/leaf_domain = "1"/leaf_domain = "2"/; s/nullifier_hash = "0x[0-9a-f]*"/nullifier_hash = "0x0"/' Prover.toml ;; # deposit leaf claimed as an event
+    nullzero)     sed -i 's/nullifier_hash = "0x[0-9a-f]*"/nullifier_hash = "0x0"/' Prover.toml ;; # deposit without its nullifier
+    evnullifier)  sed -i 's/nullifier_hash = "0x0"/nullifier_hash = "0x1234"/' Prover.toml ;;     # event carrying a nullifier
+    evasdeposit)  sed -i 's/leaf_domain = "2"/leaf_domain = "1"/' Prover.toml ;;                 # event leaf claimed as a deposit
+    evdomain)     sed -i 's/leaf_domain = "2"/leaf_domain = "3"/' Prover.toml ;;                 # appended as 2, claimed as 3
     peakslen1)    sed -i 's/peaks_len = "[0-9]*"/peaks_len = "1"/' Prover.toml ;;                # peak-count (malleability)
     leafoob)      sed -i 's/leaf_index = "[0-9]*"/leaf_index = "999999"/' Prover.toml ;;         # out-of-bounds
     leafwrong)    sed -i 's/leaf_index = "[0-9]*"/leaf_index = "8"/' Prover.toml ;;              # wrong in-bounds leaf
@@ -30,6 +36,8 @@ mutate() {
     domainstrip)  sed -i "s|target_root = \"0x[0-9a-f]*\"|target_root = \"$(cat untagged_root.txt)\"|" Prover.toml ;; # wrong/missing domain tag
     *) echo "unknown case: $1"; exit 2 ;;
   esac
+  case "$1" in ev*) ref=Prover_d2.toml ;; *) ref=Prover.valid.toml ;; esac
+  cmp -s Prover.toml "$ref" && { echo "FAIL  mutation $1 changed nothing"; fail=1; }
 }
 
 echo "==> generating a real proof fixture from the SDK"
@@ -41,16 +49,24 @@ nargo compile >/dev/null 2>&1 || { echo "circuit compile failed"; exit 2; }
 
 fail=0
 
-# the valid proof MUST be accepted
-cp Prover.valid.toml Prover.toml
-if nargo execute _ok >/dev/null 2>&1; then
-  echo "PASS  valid proof accepted"
-else
-  echo "FAIL  valid proof REJECTED (false negative)"; fail=1
-fi
+# every valid claim MUST be accepted: deposits (0, 1) and events (2, 3, 4)
+for p in Prover.valid Prover_d0 Prover_d2 Prover_d3 Prover_d4; do
+  if nargo execute -p "$p" _ok >/dev/null 2>&1; then
+    echo "PASS  valid claim accepted - $p"
+  else
+    echo "FAIL  valid claim REJECTED - $p (false negative)"; fail=1
+  fi
+done
+
+# an event claim carrying a nullifier MUST fail the event branch itself
+mutate evnullifier
+out=$(nargo execute _neg 2>&1)
+if [ $? -eq 0 ]; then echo "FAIL  forgery ACCEPTED - evnullifier   (SOUNDNESS HOLE)"; fail=1
+elif grep -q "event claims carry no nullifier" <<<"$out"; then echo "PASS  forgery rejected by the event branch - evnullifier"
+else echo "FAIL  evnullifier rejected, but not by the event branch"; fail=1; fi
 
 # every forgery MUST be rejected
-CASES=(side peakslen1 leafoob leafwrong chosen1 pathlen2 flipdir parentidx sibling forgepeak reorderpeaks domainstrip)
+CASES=(side asevent nullzero evasdeposit evdomain peakslen1 leafoob leafwrong chosen1 pathlen2 flipdir parentidx sibling forgepeak reorderpeaks domainstrip)
 for c in "${CASES[@]}"; do
   mutate "$c"
   if nargo execute _neg >/dev/null 2>&1; then
@@ -62,5 +78,5 @@ done
 
 cp Prover.valid.toml Prover.toml
 echo
-if [ "$fail" -eq 0 ]; then echo "ALL ADVERSARIAL TESTS PASSED ($((${#CASES[@]}+1)) cases)"; else echo "ADVERSARIAL TESTS FAILED"; fi
+if [ "$fail" -eq 0 ]; then echo "ALL ADVERSARIAL TESTS PASSED ($((${#CASES[@]}+6)) cases)"; else echo "ADVERSARIAL TESTS FAILED"; fi
 exit $fail
