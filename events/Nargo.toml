@@ -1,5 +1,5 @@
 [package]
-name = "deposit_circuit"
+name = "event_circuit"
 type = "bin"
 authors = [""]
 

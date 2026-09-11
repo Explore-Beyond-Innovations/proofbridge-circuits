@@ -1,4 +1,4 @@
-// Generates real fixtures for the deposit circuit using the proofbridge_mmr SDK: one tree holding
+// Generates real fixtures for the event circuit using the proofbridge_mmr SDK: one tree holding
 // leaves of every domain (leaf i has domain i % 5), and a Prover file per domain claiming a real leaf.
 // Prover.toml = domain 1 (ad-side deposit); Prover_d{0,2,3,4}.toml the rest; plus an untagged-root sidecar. Run via the SDK's ts-node
 // (see test-sdk-e2e.sh / adversarial-tests.sh). Imports the SDK by relative path so it needs no
@@ -18,7 +18,7 @@ const toBuf = (x: bigint) => Buffer.from(x.toString(16).padStart(64, "0"), "hex"
 const bufToBig = (b: Buffer) => BigInt("0x" + b.toString("hex"));
 const fieldMod = (x: bigint) => ((x % P) + P) % P;
 const DOMAIN = bufToBig(DOMAIN_TAG);
-const CIRCUIT = path.join(__dirname, "..", "..", "deposits");
+const CIRCUIT = path.join(__dirname, "..", "..", "events");
 
 async function main() {
   const hasher = new Poseidon2Hasher();

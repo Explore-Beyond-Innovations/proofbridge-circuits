@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - "auth/**"
-      - "deposits/**"
+      - "events/**"
       - "tests/**"
       - "scripts/build_circuits.sh"
       - ".github/workflows/circuits.yml"
@@ -14,8 +14,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  deposit-circuit:
-    name: Deposit circuit — gates + soundness
+  event-circuit:
+    name: Event circuit — gates + soundness
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: "18"
 
-      # The fixture generator (tests/deposits/gen-fixture.ts) imports the SDK by
+      # The fixture generator (tests/events/gen-fixture.ts) imports the SDK by
       # relative path: ../../../packages/proofbridge_mmr/src — i.e. a `packages/`
       # directory NEXT TO this checkout (in the ProofBridge monorepo that's the
       # workspace package). Here we unpack the published npm tarball there and
@@ -46,17 +46,17 @@ jobs:
           printf 'export * from "../dist";\n' > src/index.ts
 
       # Installs nargo + bb and adds them to PATH for later steps.
-      - name: Build deposit circuit
-        run: scripts/build_circuits.sh deposits
+      - name: Build event circuit
+        run: scripts/build_circuits.sh events
 
-      # Regression tripwire: the deposit proof regressed to ~90s once because the gate count ballooned.
+      # Regression tripwire: the proof regressed to ~90s once because the gate count ballooned.
       # Fail fast if the lean circuit grows past its bound (prove time tracks the gate/dyadic size).
       - name: Gate-count tripwire
         run: |
           export PATH="$HOME/.bb/bin:$PATH"
-          gates=$(bb gates -b deposits/target/deposit_circuit.json | jq '.functions[0].circuit_size')
+          gates=$(bb gates -b events/target/event_circuit.json | jq '.functions[0].circuit_size')
           limit=20000
-          echo "deposit circuit gate count: $gates (limit $limit)"
+          echo "event circuit gate count: $gates (limit $limit)"
           [ "$gates" -le "$limit" ] || { echo "::error::gate count $gates exceeds $limit — proving will regress (milestone 1.3)"; exit 1; }
 
       # Soundness: regenerate a real SDK fixture, confirm the valid proof is accepted and every forgery
@@ -65,4 +65,4 @@ jobs:
         run: |
           export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
           ./adversarial-tests.sh
-        working-directory: tests/deposits
+        working-directory: tests/events

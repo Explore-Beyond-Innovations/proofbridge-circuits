@@ -8,8 +8,8 @@
 # CI-friendly: exits non-zero on any failure.
 #
 set -uo pipefail
-TESTS="$(cd "$(dirname "$0")" && pwd)"          # proof_circuits/tests/deposits
-CIRCUIT="$TESTS/../../deposits"
+TESTS="$(cd "$(dirname "$0")" && pwd)"          # proof_circuits/tests/events
+CIRCUIT="$TESTS/../../events"
 SDK="$TESTS/../../../packages/proofbridge_mmr"
 
 echo "==> generating a proof with the SDK"
@@ -22,8 +22,8 @@ nargo compile >/dev/null 2>&1 || { echo "FAIL: nargo compile"; exit 1; }
 nargo execute e2e >/dev/null 2>&1 || { echo "FAIL: circuit rejected the SDK proof"; exit 1; }
 
 echo "==> prove + verify"
-bb prove    -b target/deposit_circuit.json -w target/e2e.gz -o target >/dev/null 2>&1 || { echo "FAIL: bb prove"; exit 1; }
-bb write_vk -b target/deposit_circuit.json -o target >/dev/null 2>&1                   || { echo "FAIL: bb write_vk"; exit 1; }
+bb prove    -b target/event_circuit.json -w target/e2e.gz -o target >/dev/null 2>&1 || { echo "FAIL: bb prove"; exit 1; }
+bb write_vk -b target/event_circuit.json -o target >/dev/null 2>&1                   || { echo "FAIL: bb write_vk"; exit 1; }
 bb verify   -k target/vk -p target/proof >/dev/null 2>&1                               || { echo "FAIL: bb verify"; exit 1; }
 
-echo "PASS: SDK proof accepted and verified by the production deposit circuit"
+echo "PASS: SDK proof accepted and verified by the event circuit"

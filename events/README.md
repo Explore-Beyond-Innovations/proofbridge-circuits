@@ -1,4 +1,4 @@
-# Deposits Proof Circuit
+# Event Proof Circuit
 
 A Noir circuit that produces a **succinct, on-chain-verifiable attestation** that an order is included
 in a Merkle Mountain Range (MMR) under a given root. The destination chain cannot read the source
@@ -93,8 +93,8 @@ nargo check                  # compile + validate the input schema
 nargo execute                # produce the witness in ./target/
 
 # prove + verify
-bb prove     -b ./target/deposit_circuit.json -w ./target/deposit_circuit.gz -o ./target
-bb write_vk  -b ./target/deposit_circuit.json -o ./target
+bb prove     -b ./target/event_circuit.json -w ./target/event_circuit.gz -o ./target
+bb write_vk  -b ./target/event_circuit.json -o ./target
 bb verify    -k ./target/vk -p ./target/proof
 ```
 

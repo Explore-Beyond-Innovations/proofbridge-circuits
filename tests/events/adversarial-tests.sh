@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Adversarial / forgery suite for the deposit circuit. Generates REAL claims from the SDK (one tree with
+# Adversarial / forgery suite for the event circuit. Generates REAL claims from the SDK (one tree with
 # leaves of every domain), confirms valid deposits (domains 0, 1) and event claims (2, 3, 4) are
 # accepted, then applies each forgery mutation (sed-based) and confirms every one is REJECTED.
 #
 # Run: ./adversarial-tests.sh    (from proof_circuits/tests)
 #
 set -uo pipefail
-TESTS="$(cd "$(dirname "$0")" && pwd)"          # proof_circuits/tests/deposits
-CIRCUIT="$TESTS/../../deposits"
+TESTS="$(cd "$(dirname "$0")" && pwd)"          # proof_circuits/tests/events
+CIRCUIT="$TESTS/../../events"
 SDK="$TESTS/../../../packages/proofbridge_mmr"
 FAKE='0x00000000000000000000000000000000000000000000000000000000deadbeef'
 
