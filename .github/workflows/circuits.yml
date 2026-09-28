@@ -13,6 +13,9 @@ on:
   workflow_call:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   event-circuit:
     name: Event circuit — gates + soundness
@@ -41,8 +44,10 @@ jobs:
           rm proofbridge-mmr-1.4.0.tgz
           mv package "$SDK_PARENT/proofbridge_mmr"
           cd "$SDK_PARENT/proofbridge_mmr"
-          npm install --no-audit --no-fund
-          npm install --no-save --no-audit --no-fund ts-node typescript @types/node
+          # C2-1: the published package has a `prepare: npm run build` but ships no tsconfig, so a
+          # bare `npm install` runs tsc against nothing and fails. Its dist/ is already built.
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save --ignore-scripts --no-audit --no-fund ts-node typescript @types/node
           mkdir -p src
           printf 'export * from "../dist";\n' > src/index.ts
 

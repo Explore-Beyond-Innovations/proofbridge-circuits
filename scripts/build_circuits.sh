@@ -22,7 +22,7 @@ install_nargo() {
   if command -v nargo >/dev/null 2>&1; then return; fi
 
   echo "installing nargo $NOIR_VERSION"
-  curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | \
+  curl -L https://raw.githubusercontent.com/noir-lang/noirup/bedac8fbe6a059177c35e565f9f76db54a795976/install | \
     NOIR_VERSION="$NOIR_VERSION" bash
   export PATH="$HOME/.nargo/bin:$PATH"
   if [ -n "${GITHUB_PATH:-}" ]; then echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"; fi

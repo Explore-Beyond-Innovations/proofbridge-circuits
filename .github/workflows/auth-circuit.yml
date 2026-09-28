@@ -16,6 +16,9 @@ on:
     - cron: "0 5 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   fixtures:
     name: Auth circuit — fixtures solve as expected
@@ -27,7 +30,8 @@ jobs:
       # The pin build_circuits.sh enforces; only nargo is needed to solve witnesses.
       - name: Install nargo 1.0.0-beta.9
         run: |
-          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          # noirup pinned to a commit (C2-3): only the nargo version was pinned before.
+          curl -L https://raw.githubusercontent.com/noir-lang/noirup/bedac8fbe6a059177c35e565f9f76db54a795976/install | bash
           "$HOME/.nargo/bin/noirup" -v 1.0.0-beta.9
           echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
 

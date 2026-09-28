@@ -38,7 +38,9 @@ mutate() {
     domainstrip)  sed -i "s|target_root = \"0x[0-9a-f]*\"|target_root = \"$(cat untagged_root.txt)\"|" Prover.toml ;; # wrong/missing domain tag
     *) echo "unknown case: $1"; exit 2 ;;
   esac
-  case "$1" in ev*) ref=Prover_d2.toml ;; *) ref=Prover.valid.toml ;; esac
+  # C2-2: the FORFEIT cases mutate the domain-5 fixture; comparing them with the valid domain-1 file
+  # always "changed", so a no-op sed would go unnoticed and a forgery could be accepted in silence.
+  case "$1" in ff*) ref=Prover_d5.toml ;; ev*) ref=Prover_d2.toml ;; *) ref=Prover.valid.toml ;; esac
   cmp -s Prover.toml "$ref" && { echo "FAIL  mutation $1 changed nothing"; fail=1; }
 }
 
