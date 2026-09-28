@@ -29,15 +29,16 @@ jobs:
       # relative path: ../../../packages/proofbridge_mmr/src — i.e. a `packages/`
       # directory NEXT TO this checkout (in the ProofBridge monorepo that's the
       # workspace package). Here we unpack the published npm tarball there and
-      # shim src/ to re-export dist/.
+      # shim src/ to re-export dist/. Keep the version equal to the monorepo's
+      # packages/proofbridge_mmr, or the fixture tests a tree the relayer no longer builds.
       - name: Fetch proofbridge-mmr SDK
         run: |
           set -euo pipefail
           SDK_PARENT="$(dirname "$GITHUB_WORKSPACE")/packages"
           mkdir -p "$SDK_PARENT"
-          npm pack proofbridge-mmr@1.2.1
-          tar -xzf proofbridge-mmr-1.2.1.tgz
-          rm proofbridge-mmr-1.2.1.tgz
+          npm pack proofbridge-mmr@1.4.0
+          tar -xzf proofbridge-mmr-1.4.0.tgz
+          rm proofbridge-mmr-1.4.0.tgz
           mv package "$SDK_PARENT/proofbridge_mmr"
           cd "$SDK_PARENT/proofbridge_mmr"
           npm install --no-audit --no-fund

@@ -31,7 +31,7 @@ async function main() {
   for (let i = 1; i <= 10; i++) {
     const oh = fieldMod(BigInt(i) * 0x9e3779b97f4a7c15n + 0x1234567n); // distinct test order hash
     orderFields.push(oh);
-    await mmr.append(encodeLeaf(oh, i % 5, hasher));
+    await mmr.append(encodeLeaf(oh, i % 6, hasher)); // domains 0..5, FORFEIT (5) included
   }
 
   const secret = fieldMod(0xa11ce5ec2e7000feedface1234567890abcdef00n);
@@ -47,9 +47,9 @@ async function main() {
     arr.concat(Array(n - arr.length).fill(0)).slice(0, n);
 
   let untagged = "";
-  for (let domain = 0; domain < 5; domain++) {
-    // leaves 5,6,2,3,4 carry domains 0,1,2,3,4: all in the first mountain (chosen_peak 0)
-    const leaf = [5, 6, 2, 3, 4][domain];
+  for (let domain = 0; domain < 6; domain++) {
+    // leaves 6,7,2,3,4,5 carry domains 0..5: all in the first mountain (chosen_peak 0)
+    const leaf = [6, 7, 2, 3, 4, 5][domain];
     const proof = await mmr.getMerkleProof(mmr.getLeafIndex(leaf));
     const orderHash = orderFields[leaf - 1];
 
@@ -87,7 +87,7 @@ chosen_peak = "${proof.chosenPeak}"
     fs.writeFileSync(path.join(CIRCUIT, domain === 1 ? "Prover.toml" : `Prover_d${domain}.toml`), toml + "\n");
   }
   fs.writeFileSync(path.join(CIRCUIT, "untagged_root.txt"), untagged + "\n");
-  console.log("wrote Prover.toml (domain 1) + Prover_d{0,2,3,4}.toml");
+  console.log("wrote Prover.toml (domain 1) + Prover_d{0,2,3,4,5}.toml");
 }
 
 main().catch((e) => {
