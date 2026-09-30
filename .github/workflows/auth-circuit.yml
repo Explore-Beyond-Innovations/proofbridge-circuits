@@ -7,10 +7,12 @@ on:
     branches: [main]
     paths:
       - "auth/**"
+      - "scripts/build_circuits.sh"
       - ".github/workflows/auth-circuit.yml"
   pull_request:
     paths:
       - "auth/**"
+      - "scripts/build_circuits.sh"
       - ".github/workflows/auth-circuit.yml"
   schedule:
     - cron: "0 5 * * 1"
@@ -27,13 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The pin build_circuits.sh enforces; only nargo is needed to solve witnesses.
-      - name: Install nargo 1.0.0-beta.9
-        run: |
-          # noirup pinned to a commit (C2-3): only the nargo version was pinned before.
-          curl -L https://raw.githubusercontent.com/noir-lang/noirup/bedac8fbe6a059177c35e565f9f76db54a795976/install | bash
-          "$HOME/.nargo/bin/noirup" -v 1.0.0-beta.9
-          echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
+      # The pinned nargo + bb, each checked against the sha256 in build_circuits.sh (nargo solves the witnesses).
+      - name: Install the pinned toolchain
+        run: scripts/build_circuits.sh --install
 
       - name: Compile
         working-directory: auth
