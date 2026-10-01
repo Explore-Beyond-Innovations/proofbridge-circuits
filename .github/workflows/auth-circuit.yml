@@ -1,0 +1,42 @@
+name: Auth circuit
+
+# The BLS auth circuit had no CI (pre-soak audit C-39). Its fixtures solve in ~7.5 min and ~12 GB, so
+# it runs when the circuit changes and weekly, not on every PR.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "auth/**"
+      - "scripts/build_circuits.sh"
+      - ".github/workflows/auth-circuit.yml"
+  pull_request:
+    paths:
+      - "auth/**"
+      - "scripts/build_circuits.sh"
+      - ".github/workflows/auth-circuit.yml"
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    name: Auth circuit — fixtures solve as expected
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pinned nargo + bb, each checked against the sha256 in build_circuits.sh (nargo solves the witnesses).
+      - name: Install the pinned toolchain
+        run: scripts/build_circuits.sh --install
+
+      - name: Compile
+        working-directory: auth
+        run: nargo compile
+
+      # valid and single-signer must solve; an invalid signature and a wrong public key must not.
+      - name: Fixtures
+        run: bash auth/scripts/run-fixtures.sh
